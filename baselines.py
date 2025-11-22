@@ -4,13 +4,11 @@ from typing import Callable, Tuple
 from config.nodes_config import NODES_CONFIG
 from env_fog import FogEnv
 
-
 def round_robin_policy(step_idx: int, num_nodes: int, state: np.ndarray) -> int:
     """
     Very simple: cycle through nodes 0..num_nodes-1.
     """
     return step_idx % num_nodes
-
 
 def least_loaded_policy(step_idx: int, num_nodes: int, state: np.ndarray) -> int:
     """
@@ -22,7 +20,6 @@ def least_loaded_policy(step_idx: int, num_nodes: int, state: np.ndarray) -> int
     node_feats = state[:num_nodes]  # shape (num_nodes,)
     # smallest "time until available" -> least loaded
     return int(np.argmin(node_feats))
-
 
 def run_policy(
     env: FogEnv,
@@ -76,7 +73,6 @@ def run_policy(
 
     return avg_reward, avg_energy, avg_latency, miss_rate
 
-
 def main():
     # For now, set E_ref and L_ref to 1 so we see raw magnitudes in reward.
     env = FogEnv(
@@ -105,7 +101,6 @@ def main():
     print(f"  Avg energy per task:   {ll_stats[1]:.4f} J")
     print(f"  Avg latency per task:  {ll_stats[2]:.4f} s")
     print(f"  Deadline miss rate:    {ll_stats[3]*100:.2f}%")
-
 
 if __name__ == "__main__":
     main()

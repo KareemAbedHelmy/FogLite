@@ -1,19 +1,14 @@
 import numpy as np
 from typing import Callable, Tuple
-
 from stable_baselines3 import DQN
-
 from config.nodes_config import NODES_CONFIG
 from env_fog import FogEnv
 from env_wrapper import FogGymWrapper
-
 from baselines import round_robin_policy, least_loaded_policy
-
 
 def random_policy(step_idx: int, num_nodes: int, state: np.ndarray) -> int:
     """Uniform random choice of node."""
     return np.random.randint(0, num_nodes)
-
 
 def run_policy_env(
     fog_env: FogEnv,
@@ -66,7 +61,6 @@ def run_policy_env(
 
     return avg_reward, avg_energy, avg_latency, miss_rate
 
-
 def run_dqn_policy(
     model_path: str,
     fog_env: FogEnv,
@@ -113,7 +107,6 @@ def run_dqn_policy(
 
     return avg_reward, avg_energy, avg_latency, miss_rate
 
-
 def print_results(name: str, stats: Tuple[float, float, float, float]):
     avg_reward, avg_energy, avg_latency, miss_rate = stats
     print(f"=== {name} ===")
@@ -122,7 +115,6 @@ def print_results(name: str, stats: Tuple[float, float, float, float]):
     print(f"  Avg latency per task:  {avg_latency:.4f} s")
     print(f"  Deadline miss rate:    {miss_rate*100:.2f}%")
     print()
-
 
 def main():
     # Create a fresh FogEnv for evaluation
@@ -153,7 +145,6 @@ def main():
     print_results("Least Loaded", ll_stats)
     print_results("Random", rand_stats)
     print_results("DQN (learned)", dqn_stats)
-
 
 if __name__ == "__main__":
     main()

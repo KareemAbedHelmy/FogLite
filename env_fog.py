@@ -1,8 +1,6 @@
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Any, Optional
-
-
 @dataclass
 class Task:
     """
@@ -15,8 +13,6 @@ class Task:
     length_mi: float
     deadline: float
     arrival_time: float
-
-
 @dataclass
 class Node:
     """
@@ -30,12 +26,9 @@ class Node:
     power_idle: float     # Watts
     power_max: float      # Watts at 100% utilisation
     base_latency: float   # network latency (seconds) from IoT to this node
-
     # dynamic fields
     queue: List[Task] = field(default_factory=list)
     busy_until: float = 0.0  # time when node becomes free (simple single-queue model)
-
-
 class FogEnv:
     """
     Custom fog scheduling environment.
@@ -69,19 +62,15 @@ class FogEnv:
         self.lambda_deadline = lambda_deadline
         self.lambda_overload = lambda_overload
         self.u_max = u_max
-
         # normalisation constants
         self.E_ref = e_ref
         self.L_ref = l_ref
-
         # episode settings
         self.episode_length = episode_length
         self.task_length_range = task_length_range
         self.deadline_slack_range = deadline_slack_range
-
         # RNG
         self._rng = np.random.default_rng(seed)
-
         # Build nodes
         self.nodes: List[Node] = []
         for i, cfg in enumerate(nodes_config):
@@ -97,17 +86,12 @@ class FogEnv:
                     base_latency=float(cfg["base_latency"]),
                 )
             )
-
         self.num_nodes = len(self.nodes)
-
         # Simulation state
         self.current_time: float = 0.0
         self.steps_done: int = 0
         self.current_task: Optional[Task] = None
-
-    # -------------------------------------------------
-    # Public API
-    # -------------------------------------------------
+        
     def reset(self) -> np.ndarray:
         """
         Reset environment for a new episode.
@@ -145,10 +129,8 @@ class FogEnv:
 
         chosen_node = self.nodes[action]
         task = self.current_task
-
         # simulate assignment
         E_i, L_i, U_i, deadline_miss, overload = self._simulate_task_on_node(task, chosen_node)
-
         # reward
         reward = self._compute_reward(
             E_i=E_i,
@@ -159,7 +141,6 @@ class FogEnv:
             overload=overload,
             arrival=task.arrival_time,
         )
-
         # simple model: next task arrives immediately after this decision
         self.current_time = max(self.current_time, task.arrival_time)
         self.steps_done += 1
@@ -182,10 +163,7 @@ class FogEnv:
         }
 
         return next_state, reward, done, info
-
-    # -------------------------------------------------
-    # Internal helpers
-    # -------------------------------------------------
+    
     def _generate_task(self) -> Task:
         """
         Generate a new task with random length and deadline slack.

@@ -2,7 +2,6 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from env_fog import FogEnv
-
 class FogGymWrapper(gym.Env):
     """
     Wraps your FogEnv into a Gymnasium-compatible environment
@@ -20,7 +19,6 @@ class FogGymWrapper(gym.Env):
     def __init__(self, fog_env: FogEnv):
         super().__init__()
         self.fog_env = fog_env
-
         # Observation space is a vector of floats
         # FogEnv builds state of shape: num_nodes + 2
         dummy_state = self.fog_env.reset()
@@ -32,7 +30,6 @@ class FogGymWrapper(gym.Env):
             shape=(obs_dim,),
             dtype=np.float32
         )
-
         # Action space = choose node index
         self.action_space = spaces.Discrete(self.fog_env.num_nodes)
 
