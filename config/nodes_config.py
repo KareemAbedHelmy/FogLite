@@ -1,18 +1,12 @@
 """
 Node configuration for the fog + cloud environment.
-
-You can later tune these values to better match:
-- the table in your paper, and/or
-- Azure VM sizes (B1s, B2s, etc.).
-
 Units:
 - mips: million instructions per second
 - power_idle, power_max: Watts
 - base_latency: seconds
 """
-
 NODES_CONFIG = [
-    # -------- Fog nodes (close to IoT) --------
+    # Fog Nodes
     {
         "name": "Fog1",
         "is_cloud": False,
@@ -40,8 +34,7 @@ NODES_CONFIG = [
         "power_max": 110.0,
         "base_latency": 0.020,  # 20 ms
     },
-
-    # -------- Cloud datacenter node --------
+    # Cloud Data Center
     {
         "name": "CloudDC1",
         "is_cloud": True,
