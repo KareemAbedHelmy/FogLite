@@ -4,9 +4,8 @@ import numpy as np
 from env_fog import FogEnv
 class FogGymWrapper(gym.Env):
     """
-    Wraps your FogEnv into a Gymnasium-compatible environment
+    Wraps the FogEnv into a Gymnasium-compatible environment
     so Stable-Baselines3 DQN can train on it.
-
     Requirements:
     - observation_space
     - action_space

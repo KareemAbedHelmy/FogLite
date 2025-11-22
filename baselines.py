@@ -13,8 +13,6 @@ def round_robin_policy(step_idx: int, num_nodes: int, state: np.ndarray) -> int:
 def least_loaded_policy(step_idx: int, num_nodes: int, state: np.ndarray) -> int:
     """
     Choose the node with the smallest (busy_until - current_time) feature.
-
-    In our state, the first `num_nodes` entries are the normalised "avail_in"
     for each node (0 = free now, closer to 1 = busy for longer).
     """
     node_feats = state[:num_nodes]  # shape (num_nodes,)
@@ -28,7 +26,6 @@ def run_policy(
 ) -> Tuple[float, float, float, float]:
     """
     Run a policy for a number of episodes.
-
     Returns:
         avg_reward_per_step,
         avg_energy_per_task,

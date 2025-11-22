@@ -5,7 +5,6 @@ from typing import List, Tuple, Dict, Any, Optional
 class Task:
     """
     Represents one incoming task.
-
     length_mi: task length in million instructions
     deadline: absolute time by which it should finish
     arrival_time: when it arrived in the system
@@ -32,13 +31,10 @@ class Node:
 class FogEnv:
     """
     Custom fog scheduling environment.
-
     - At each step, a new task arrives (Task object).
     - Agent chooses a node index (0..num_nodes-1).
     - Env simulates assignment, computes latency & energy.
     - Returns next_state, reward, done, info.
-
-    This is written in a Gym-like style but without requiring gym as a dependency.
     """
 
     def __init__(
@@ -95,7 +91,6 @@ class FogEnv:
     def reset(self) -> np.ndarray:
         """
         Reset environment for a new episode.
-
         Returns initial state.
         """
         self.current_time = 0.0
@@ -111,10 +106,8 @@ class FogEnv:
     def step(self, action: int):
         """
         Perform one scheduling decision.
-
         Args:
             action: integer node index (0 <= action < num_nodes)
-
         Returns:
             next_state (np.ndarray or None if done),
             reward (float),
@@ -187,47 +180,35 @@ class FogEnv:
     ) -> Tuple[float, float, float, bool, bool]:
         """
         Compute latency, energy and utilisation impact of assigning `task` to `node`.
-
         Updates node.busy_until and node.queue.
         """
 
         # When does processing start? When node is free or task arrives, whichever is later.
         start_time = max(task.arrival_time, node.busy_until)
-
         # Service time (seconds) = length (MI) / speed (MI/s)
         service_time = task.length_mi / node.mips
-
         # Queueing delay (if node is still busy when task arrives)
         queueing_delay = max(0.0, node.busy_until - task.arrival_time)
-
         # Network latency (fixed per node)
         net_delay = node.base_latency
-
         # Completion time of compute (not including net_delay to send back result)
         completion_time = start_time + service_time
-
         # End-to-end latency from arrival, including network delay
         L_i = (completion_time - task.arrival_time) + net_delay
-
         # Update node state
         node.busy_until = completion_time
         node.queue.append(task)
-
         # Approximate utilisation for this task
         # Simple model: assume one core is fully used during service_time
         U_i = min(1.0, 1.0 / max(1, node.cores))
-
         # Power model: P = P_idle + (P_max - P_idle) * U
         P_avg = node.power_idle + (node.power_max - node.power_idle) * U_i
         E_i = P_avg * service_time  # Joules if P in Watts and time in seconds
-
         # Deadline miss? Compare latency to deadline slack
         deadline_slack = task.deadline - task.arrival_time
         deadline_miss = L_i > deadline_slack
-
         # Overload? here we use U_i > u_max as threshold
         overload = U_i > self.u_max
-
         return E_i, L_i, U_i, deadline_miss, overload
 
     def _compute_reward(
@@ -242,50 +223,39 @@ class FogEnv:
     ) -> float:
         """
         Apply the RL reward formula:
-
         r_i = - (alpha * E_hat + beta * L_hat)
               - lambda_deadline * I[deadline_miss]
               - lambda_overload * I[overload]
         """
-
         # normalise
         hat_E = E_i / self.E_ref if self.E_ref > 0 else E_i
         hat_L = L_i / self.L_ref if self.L_ref > 0 else L_i
-
         cost = self.alpha * hat_E + self.beta * hat_L
-
         penalty = 0.0
         if deadline_miss:
             penalty += self.lambda_deadline
         if overload:
             penalty += self.lambda_overload
-
         reward = -(cost + penalty)
         return reward
 
     def _build_state(self) -> np.ndarray:
         """
         Build state vector:
-
         [ node1_feature, node2_feature, ..., nodeN_feature,
           task_length_norm, task_slack_norm ]
-
         For now, each node feature is (busy_until - current_time) normalised.
-        You can extend this later to include queue length etc.
         """
         node_feats = []
         # normalisation factor for how far in the future busy_until can go
         max_future = max(self.deadline_slack_range[1], 1.0)
-
         for node in self.nodes:
             avail_in = max(0.0, node.busy_until - self.current_time)
             node_feats.append(avail_in / max_future)
 
         t = self.current_task
         slack = max(0.0, t.deadline - self.current_time)
-
         length_norm = t.length_mi / max(self.task_length_range)
         slack_norm = slack / max(self.deadline_slack_range)
-
         state = np.array(node_feats + [length_norm, slack_norm], dtype=np.float32)
         return state
