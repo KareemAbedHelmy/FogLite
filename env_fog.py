@@ -26,8 +26,9 @@ class Node:
     power_max: float      # Watts at 100% utilisation
     base_latency: float   # network latency (seconds) from IoT to this node
     # dynamic fields
+    running_intervals: List[Tuple[float, float]] = field(default_factory=list)  # (task, completion_time)
     queue: List[Task] = field(default_factory=list)
-    busy_until: float = 0.0  # time when node becomes free (simple single-queue model)
+    busy_until: float = 0.0  # time when node becomes free
 class FogEnv:
     """
     Custom fog scheduling environment.
@@ -36,20 +37,20 @@ class FogEnv:
     - Env simulates assignment, computes latency & energy.
     - Returns next_state, reward, done, info.
     """
-
     def __init__(
         self,
         nodes_config: List[Dict[str, Any]],
         episode_length: int = 500,
         alpha: float = 0.5,
         beta: float = 0.5,
-        lambda_deadline: float = 1.0,
+        lambda_deadline: float = 2.0,
         lambda_overload: float = 0.5,
         u_max: float = 0.9,
-        e_ref: float = 1.0,
-        l_ref: float = 1.0,
-        task_length_range: Tuple[float, float] = (10.0, 100.0),  # MI
-        deadline_slack_range: Tuple[float, float] = (0.5, 5.0),  # seconds
+        e_ref: float = 6.0,
+        l_ref: float = 3.0,
+        task_length_range: Tuple[float, float] = (50.0, 250.0),  # MI
+        deadline_slack_range: Tuple[float, float] = (1.0, 3.0),  # seconds
+        interarrival_range: Tuple[float, float] = (0.0, 0.05),  # seconds
         seed: Optional[int] = None,
     ):
         # reward weights
@@ -57,6 +58,7 @@ class FogEnv:
         self.beta = beta
         self.lambda_deadline = lambda_deadline
         self.lambda_overload = lambda_overload
+        self.interarrival_range = interarrival_range
         self.u_max = u_max
         # normalisation constants
         self.E_ref = e_ref
@@ -95,9 +97,9 @@ class FogEnv:
         """
         self.current_time = 0.0
         self.steps_done = 0
-
         for node in self.nodes:
             node.queue.clear()
+            node.running_intervals.clear()
             node.busy_until = 0.0
 
         self.current_task = self._generate_task()
@@ -135,11 +137,14 @@ class FogEnv:
             arrival=task.arrival_time,
         )
         # simple model: next task arrives immediately after this decision
-        self.current_time = max(self.current_time, task.arrival_time)
         self.steps_done += 1
         done = self.steps_done >= self.episode_length
 
         if not done:
+            # Advance time by random inter-arrival before the next task arrives
+            delta_t = float(self._rng.uniform(*self.interarrival_range))
+            self.current_time = max(self.current_time, task.arrival_time) + delta_t
+            # and then generate next task at new current_time
             self.current_task = self._generate_task()
             next_state = self._build_state()
         else:
@@ -172,43 +177,84 @@ class FogEnv:
             deadline=deadline,
             arrival_time=arrival,
         )
-
     def _simulate_task_on_node(
-        self,
-        task: Task,
-        node: Node,
-    ) -> Tuple[float, float, float, bool, bool]:
+    self,
+    task: Task,
+    node: Node,
+) -> Tuple[float, float, float, bool, bool]:
         """
-        Compute latency, energy and utilisation impact of assigning `task` to `node`.
-        Updates node.busy_until and node.queue.
+        Compute latency, energy and utilisation impact of assigning `task` to `node`,
+        using continuous-time energy integration.
+        - We track all (start_time, end_time) intervals of tasks on this node.
+        - For energy, we integrate power over time only over intervals where THIS task
+        is active, with power determined by total concurrent tasks.
         """
-
-        # When does processing start? When node is free or task arrives, whichever is later.
+        # Task cannot start before it arrives or before node is free
         start_time = max(task.arrival_time, node.busy_until)
         # Service time (seconds) = length (MI) / speed (MI/s)
         service_time = task.length_mi / node.mips
-        # Queueing delay (if node is still busy when task arrives)
-        queueing_delay = max(0.0, node.busy_until - task.arrival_time)
-        # Network latency (fixed per node)
-        net_delay = node.base_latency
-        # Completion time of compute (not including net_delay to send back result)
-        completion_time = start_time + service_time
-        # End-to-end latency from arrival, including network delay
-        L_i = (completion_time - task.arrival_time) + net_delay
-        # Update node state
-        node.busy_until = completion_time
+        end_time = start_time + service_time
+        # Record this task's interval on the node
+        node.running_intervals.append((start_time, end_time))
+        # Update busy_until to reflect that the node is busy until at least end_time
+        node.busy_until = max(node.busy_until, end_time)
+        # keep queue list for stats (not needed for energy directly)
         node.queue.append(task)
-        # Approximate utilisation for this task
-        # Simple model: assume one core is fully used during service_time
-        U_i = min(1.0, 1.0 / max(1, node.cores))
-        # Power model: P = P_idle + (P_max - P_idle) * U
-        P_avg = node.power_idle + (node.power_max - node.power_idle) * U_i
-        E_i = P_avg * service_time  # Joules if P in Watts and time in seconds
-        # Deadline miss? Compare latency to deadline slack
+        net_delay = node.base_latency
+        # End-to-end latency from arrival, including network delay
+        L_i = (end_time - task.arrival_time) + net_delay
+        # Collect all time boundaries from running intervals
+        boundaries = []
+        for s, e in node.running_intervals:
+            boundaries.append(s)
+            boundaries.append(e)
+        boundaries = sorted(set(boundaries))
+        E_i = 0.0
+        max_util_during_task = 0.0
+        overload = False
+        # this task's active interval
+        t_task_start = start_time
+        t_task_end = end_time
+
+        for i in range(len(boundaries) - 1):
+            t_start = boundaries[i]
+            t_end = boundaries[i + 1]
+            duration = t_end - t_start
+            if duration <= 0:
+                continue
+            # Checks if the sub-interval overlaps with this tasks lifetime
+            if t_end <= t_task_start or t_start >= t_task_end:
+                # No overlap with our task -> this energy is for other tasks, ignore
+                continue
+            # Overlap portion with this task (in case the segment extends beyond)
+            seg_start = max(t_start, t_task_start)
+            seg_end = min(t_end, t_task_end)
+            seg_duration = seg_end - seg_start
+            if seg_duration <= 0:
+                continue
+            # Count how many tasks are active on the node during [t_start, t_end)
+            active = 0
+            for s, e in node.running_intervals:
+                if not (e <= t_start or s >= t_end):  # intervals overlap
+                    active += 1
+                    
+            # Utilisation based on number of active tasks vs cores
+            U = min(1.0, active / max(1, node.cores))
+            # Linear power model
+            P = node.power_idle + (node.power_max - node.power_idle) * U
+            # Energy contribution for THIS task in this overlapping subinterval
+            E_i += P * seg_duration
+            # Track max utilisation while this task is active
+            if U > max_util_during_task:
+                max_util_during_task = U
+            # Overload if utilisation exceeds threshold U_max while this task is active
+            if U > self.u_max:
+                overload = True
+        # Check for deadline miss
         deadline_slack = task.deadline - task.arrival_time
         deadline_miss = L_i > deadline_slack
-        # Overload? here we use U_i > u_max as threshold
-        overload = U_i > self.u_max
+        # Use max utilisation during task as U_i for reward
+        U_i = max_util_during_task
         return E_i, L_i, U_i, deadline_miss, overload
 
     def _compute_reward(

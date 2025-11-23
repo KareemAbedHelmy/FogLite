@@ -12,7 +12,6 @@ class FogGymWrapper(gym.Env):
     - reset()
     - step()
     """
-
     metadata = {"render_modes": []}
 
     def __init__(self, fog_env: FogEnv):

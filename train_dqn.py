@@ -10,14 +10,17 @@ from env_wrapper import FogGymWrapper
 def main():
     fog_env = FogEnv(
         nodes_config=NODES_CONFIG,
-        episode_length=300,
-        alpha=0.5,
-        beta=0.5,
-        lambda_deadline=1.0,
-        lambda_overload=0.5,
+        episode_length=500,
+        alpha=0.4, # weight for energy in reward
+        beta=0.6, # weight for latency in reward
+        lambda_deadline=4.0, # penalty for deadline miss
+        lambda_overload=0.5, # penalty for overload
         u_max=0.9,
-        e_ref=50.0,   # set rough normalization constants
-        l_ref=1.0,
+        e_ref=20.0,
+        l_ref=2.0,
+        task_length_range=(50.0, 250.0),
+        deadline_slack_range=(1.0, 3.0),
+        interarrival_range=(0.0, 0.05),
         seed=123,
     )
 
@@ -43,7 +46,7 @@ def main():
     )
 
     model.set_logger(new_logger)
-    total_timesteps = 50_000
+    total_timesteps = 100_000
     print(f"Training DQN for {total_timesteps} steps...")
     model.learn(total_timesteps=total_timesteps, progress_bar=True)
 

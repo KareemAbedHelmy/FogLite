@@ -26,7 +26,6 @@ def run_policy_env(
     """
     total_reward = 0.0
     total_steps = 0
-
     total_energy = 0.0
     total_latency = 0.0
     total_tasks = 0
@@ -130,17 +129,13 @@ def main():
         l_ref=1.0,
         seed=123,
     )
-
     episodes = 10
-
     # Heuristic policies
     rr_stats = run_policy_env(fog_env, round_robin_policy, episodes=episodes)
     ll_stats = run_policy_env(fog_env, least_loaded_policy, episodes=episodes)
     rand_stats = run_policy_env(fog_env, random_policy, episodes=episodes)
-
     # DQN policy
     dqn_stats = run_dqn_policy("./dqn_fog_scheduler.zip", fog_env, episodes=episodes)
-
     print_results("Round Robin", rr_stats)
     print_results("Least Loaded", ll_stats)
     print_results("Random", rand_stats)
