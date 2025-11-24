@@ -21,6 +21,9 @@ def main():
         task_length_range=(50.0, 250.0),
         deadline_slack_range=(1.0, 3.0),
         interarrival_range=(0.0, 0.05),
+        use_task_dependence=True,
+        max_stages_per_job= 3,
+        handoff_latency=0.2,
         seed=123,
     )
 

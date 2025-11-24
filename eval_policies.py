@@ -30,6 +30,10 @@ def run_policy_env(
     total_latency = 0.0
     total_tasks = 0
     total_deadline_misses = 0
+    total_job_latency = 0.0
+    total_job_energy = 0.0
+    total_job_misses = 0
+    total_jobs = 0
 
     for ep in range(episodes):
         state = fog_env.reset()
@@ -46,19 +50,32 @@ def run_policy_env(
             total_energy += info["E_i"]
             total_latency += info["L_i"]
             total_tasks += 1
-
             if info["deadline_miss"]:
                 total_deadline_misses += 1
 
             state = next_state if next_state is not None else state
             step_idx += 1
-
+        # After episode ends, gather job stats if applicable
+        for job in fog_env.completed_jobs:
+            total_job_latency += job["latency"]
+            total_job_energy += job["energy"]
+            total_jobs += 1
+            total_job_misses += 1 if job["deadline_miss"] else 0   
+            
+             
     avg_reward = total_reward / max(1, total_steps)
     avg_energy = total_energy / max(1, total_tasks)
     avg_latency = total_latency / max(1, total_tasks)
     miss_rate = total_deadline_misses / max(1, total_tasks)
-
-    return avg_reward, avg_energy, avg_latency, miss_rate
+    if total_jobs > 0:
+        avg_job_latency = total_job_latency / total_jobs
+        avg_job_energy = total_job_energy / total_jobs
+        job_miss_rate = total_job_misses / total_jobs
+    else:
+        avg_job_latency = 0.0
+        avg_job_energy = 0.0
+        job_miss_rate = 0.0
+    return avg_reward, avg_energy, avg_latency, miss_rate, avg_job_latency, avg_job_energy, job_miss_rate
 
 def run_dqn_policy(
     model_path: str,
@@ -73,11 +90,14 @@ def run_dqn_policy(
 
     total_reward = 0.0
     total_steps = 0
-
     total_energy = 0.0
     total_latency = 0.0
     total_tasks = 0
     total_deadline_misses = 0
+    total_job_latency = 0.0
+    total_job_energy = 0.0
+    total_job_misses = 0
+    total_jobs = 0
 
     for ep in range(episodes):
         obs, _ = wrapped_env.reset()
@@ -98,35 +118,57 @@ def run_dqn_policy(
                 total_deadline_misses += 1
 
             obs = next_obs
+    for job in fog_env.completed_jobs:
+        total_job_latency += job["latency"]
+        total_job_energy += job["energy"]
+        total_jobs += 1
+        total_job_misses += 1 if job["deadline_miss"] else 0
 
     avg_reward = total_reward / max(1, total_steps)
     avg_energy = total_energy / max(1, total_tasks)
     avg_latency = total_latency / max(1, total_tasks)
     miss_rate = total_deadline_misses / max(1, total_tasks)
+    if total_jobs > 0:
+        avg_job_latency = total_job_latency / total_jobs
+        avg_job_energy = total_job_energy / total_jobs
+        job_miss_rate = total_job_misses / total_jobs
+    else:
+        avg_job_latency = 0.0
+        avg_job_energy = 0.0
+        job_miss_rate = 0.0
 
-    return avg_reward, avg_energy, avg_latency, miss_rate
+    return avg_reward, avg_energy, avg_latency, miss_rate, avg_job_latency, avg_job_energy, job_miss_rate
 
 def print_results(name: str, stats: Tuple[float, float, float, float]):
-    avg_reward, avg_energy, avg_latency, miss_rate = stats
+    avg_reward, avg_energy, avg_latency, miss_rate,avg_job_latency,avg_job_energy,job_miss_rate = stats
     print(f"=== {name} ===")
     print(f"  Avg reward per step:   {avg_reward:.4f}")
     print(f"  Avg energy per task:   {avg_energy:.4f} J")
     print(f"  Avg latency per task:  {avg_latency:.4f} s")
     print(f"  Deadline miss rate:    {miss_rate*100:.2f}%")
+    print(f"  Avg job latency:       {avg_job_latency:.4f} s")
+    print(f"  Avg job energy:        {avg_job_energy:.4f} J")
+    print(f"  Job deadline miss rate:{job_miss_rate*100:.2f}%")
     print()
 
 def main():
     # Create a fresh FogEnv for evaluation
     fog_env = FogEnv(
         nodes_config=NODES_CONFIG,
-        episode_length=300,
-        alpha=0.5,
-        beta=0.5,
-        lambda_deadline=1.0,
+        episode_length=500,
+        alpha=0.4,
+        beta=0.6,
+        lambda_deadline=4.0,
         lambda_overload=0.5,
         u_max=0.9,
-        e_ref=50.0,
-        l_ref=1.0,
+        e_ref=20.0,
+        l_ref=2.0,
+        task_length_range=(50.0, 250.0),
+        deadline_slack_range=(1.0, 3.0),
+        interarrival_range=(0.0, 0.05),
+        use_task_dependence=True,
+        max_stages_per_job= 3,
+        handoff_latency=0.2,
         seed=123,
     )
     episodes = 10
