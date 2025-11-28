@@ -86,6 +86,7 @@ class FogEnv:
         self.completed_jobs: List[Dict[str, Any]] = [] # completed job stats
         self.last_node_for_job: Dict[int, int] = {} # last assigned node per job
         self.handoff_latency = handoff_latency
+        self.timeline_log = []
         # RNG
         self._rng = np.random.default_rng(seed)
         # Build nodes
@@ -126,6 +127,7 @@ class FogEnv:
         self.job_stats.clear()
         self.completed_jobs.clear()
         self.last_node_for_job.clear()
+        self.timeline_log.clear()
         if self.use_task_dependence:
             self.current_task = self._generate_job_first_task()
         else:
@@ -285,89 +287,100 @@ class FogEnv:
         )
         
     def _simulate_task_on_node(
-    self,
-    task: Task,
-    node: Node,
-    prev_node_id: Optional[int] = None,
-) -> Tuple[float, float, float, bool, bool, float]:
-        """
-        Compute latency, energy and utilisation impact of assigning `task` to `node`,
-        using continuous-time energy integration.
-        - We track all (start_time, end_time) intervals of tasks on this node.
-        - For energy, we integrate power over time only over intervals where THIS task
-        is active, with power determined by total concurrent tasks.
-        """
-        # Task cannot start before it arrives or before node is free
-        start_time = max(task.arrival_time, node.busy_until)
-        # Service time (seconds) = length (MI) / speed (MI/s)
-        service_time = task.length_mi / node.mips
-        end_time = start_time + service_time
-        # Record this task's interval on the node
-        node.running_intervals.append((start_time, end_time))
-        # Update busy_until to reflect that the node is busy until at least end_time
-        node.busy_until = max(node.busy_until, end_time)
-        # keep queue list for stats (not needed for energy directly)
-        node.queue.append(task)
-        net_delay = node.base_latency
-        # End-to-end latency from arrival, including network delay
-        handoff = 0.0
-        if prev_node_id is not None and prev_node_id != node.node_id:
-            handoff = self.handoff_latency
-        completion_time = end_time + net_delay + handoff
-        L_i = (completion_time - task.arrival_time)
-        # Collect all time boundaries from running intervals
-        boundaries = []
-        for s, e in node.running_intervals:
-            boundaries.append(s)
-            boundaries.append(e)
-        boundaries = sorted(set(boundaries))
-        E_i = 0.0
-        max_util_during_task = 0.0
-        overload = False
-        # this task's active interval
-        t_task_start = start_time
-        t_task_end = end_time
+        self,
+        task: Task,
+        node: Node,
+        prev_node_id: Optional[int] = None,
+    ) -> Tuple[float, float, float, bool, bool, float]:
+            """
+            Compute latency, energy and utilisation impact of assigning `task` to `node`,
+            using continuous-time energy integration.
+            - We track all (start_time, end_time) intervals of tasks on this node.
+            - For energy, we integrate power over time only over intervals where THIS task
+            is active, with power determined by total concurrent tasks.
+            """
+            start_time = max(task.arrival_time, node.busy_until)
+            service_time = task.length_mi / node.mips
+            end_time = start_time + service_time
 
-        for i in range(len(boundaries) - 1):
-            t_start = boundaries[i]
-            t_end = boundaries[i + 1]
-            duration = t_end - t_start
-            if duration <= 0:
-                continue
-            # Checks if the sub-interval overlaps with this tasks lifetime
-            if t_end <= t_task_start or t_start >= t_task_end:
-                # No overlap with our task -> this energy is for other tasks, ignore
-                continue
-            # Overlap portion with this task (in case the segment extends beyond)
-            seg_start = max(t_start, t_task_start)
-            seg_end = min(t_end, t_task_end)
-            seg_duration = seg_end - seg_start
-            if seg_duration <= 0:
-                continue
-            # Count how many tasks are active on the node during [t_start, t_end)
-            active = 0
+            node.running_intervals.append((start_time, end_time))
+            node.busy_until = max(node.busy_until, end_time)
+            node.queue.append(task)
+
+            net_delay = node.base_latency
+            handoff = 0.0
+            if prev_node_id is not None and prev_node_id != node.node_id:
+                handoff = self.handoff_latency
+            completion_time = end_time + net_delay + handoff
+            L_i = (completion_time - task.arrival_time)
+
+            boundaries = []
             for s, e in node.running_intervals:
-                if not (e <= t_start or s >= t_end):  # intervals overlap
-                    active += 1
-                    
-            # Utilisation based on number of active tasks vs cores
-            U = min(1.0, active / max(1, node.cores))
-            # Linear power model
-            P = node.power_idle + (node.power_max - node.power_idle) * U
-            # Energy contribution for THIS task in this overlapping subinterval
-            E_i += P * seg_duration
-            # Track max utilisation while this task is active
-            if U > max_util_during_task:
-                max_util_during_task = U
-            # Overload if utilisation exceeds threshold U_max while this task is active
-            if U > self.u_max:
-                overload = True
-        # Check for deadline miss
-        deadline_slack = task.deadline - task.arrival_time
-        deadline_miss = L_i > deadline_slack
-        # Use max utilisation during task as U_i for reward
-        U_i = max_util_during_task
-        return E_i, L_i, U_i, deadline_miss, overload, end_time
+                boundaries.append(s)
+                boundaries.append(e)
+            boundaries = sorted(set(boundaries))
+
+            E_i = 0.0
+            max_util_during_task = 0.0
+            overload = False
+
+            t_task_start = start_time
+            t_task_end = end_time
+
+            for i in range(len(boundaries) - 1):
+                t_start = boundaries[i]
+                t_end = boundaries[i + 1]
+                duration = t_end - t_start
+                if duration <= 0:
+                    continue
+                if t_end <= t_task_start or t_start >= t_task_end:
+                    continue
+
+                seg_start = max(t_start, t_task_start)
+                seg_end = min(t_end, t_task_end)
+                seg_duration = seg_end - seg_start
+                if seg_duration <= 0:
+                    continue
+
+                active = 0
+                for s, e in node.running_intervals:
+                    if not (e <= t_start or s >= t_end):
+                        active += 1
+
+                U = min(1.0, active / max(1, node.cores))
+                P = node.power_idle + (node.power_max - node.power_idle) * U
+                E_i += P * seg_duration
+
+                if U > max_util_during_task:
+                    max_util_during_task = U
+                if U > self.u_max:
+                    overload = True
+
+            deadline_slack = task.deadline - task.arrival_time
+            deadline_miss = L_i > deadline_slack
+            U_i = max_util_during_task
+
+            job_id = getattr(task, "job_id", None)
+            if job_id is None:
+                job_id = getattr(task, "job_id_", None)
+
+            stage_idx = getattr(task, "stage_idx", None)
+            num_stages = getattr(task, "num_stages", None)
+
+            if hasattr(self, "timeline_log"):
+                self.timeline_log.append({
+                    "job_id": job_id,
+                    "stage_idx": stage_idx,
+                    "num_stages": num_stages,
+                    "node_id": node.node_id,
+                    "node_name": getattr(node, "name", f"Node{node.node_id}"),
+                    "start_time": float(start_time),
+                    "finish_time": float(completion_time),
+                })
+
+            self.last_node_for_job[job_id] = node.node_id if job_id is not None else node.node_id
+
+            return E_i, L_i, U_i, deadline_miss, overload, end_time
 
     def _compute_reward(
         self,

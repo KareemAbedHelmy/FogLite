@@ -14,7 +14,7 @@ NODES_CONFIG = [
         "cores": 2,
         "power_idle": 40.0,
         "power_max": 80.0,
-        "base_latency": 0.010,  # 10 ms
+        "base_latency": 0.0010, 
     },
     {
         "name": "Fog2",
@@ -23,7 +23,7 @@ NODES_CONFIG = [
         "cores": 1,
         "power_idle": 45.0,
         "power_max": 90.0,
-        "base_latency": 0.015,  # 15 ms
+        "base_latency": 0.0015,
     },
     {
         "name": "Fog3",
@@ -32,7 +32,7 @@ NODES_CONFIG = [
         "cores": 2,
         "power_idle": 50.0,
         "power_max": 110.0,
-        "base_latency": 0.020,  # 20 ms
+        "base_latency": 0.002,  
     },
     {
         "name": "Fog4",
@@ -41,7 +41,7 @@ NODES_CONFIG = [
         "cores": 3,
         "power_idle": 60.0,
         "power_max": 130.0,
-        "base_latency": 0.025,  # 25 ms
+        "base_latency": 0.0025, 
     },
     {
         "name": "Fog5",
@@ -50,7 +50,7 @@ NODES_CONFIG = [
         "cores": 4,
         "power_idle": 70.0,
         "power_max": 150.0,
-        "base_latency": 0.030,  # 30 ms
+        "base_latency": 0.003,  
     },
     # Cloud Data Center
     {
