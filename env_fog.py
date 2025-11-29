@@ -18,6 +18,8 @@ class Task:
     job_id: int = 0
     stage_idx: int = 0
     num_stages: int = 1
+    input_size_mb: float = 0.0
+    output_size_mb: float = 0.0
 @dataclass
 class Node:
     """
@@ -31,6 +33,8 @@ class Node:
     power_idle: float     # Watts
     power_max: float      # Watts at 100% utilisation
     base_latency: float   # network latency (seconds) from IoT to this node
+    uplink_mbps: float  # uplink bandwidth in Mbps
+    downlink_mbps: float  # downlink bandwidth in Mbps
     # dynamic fields
     running_intervals: List[Tuple[float, float]] = field(default_factory=list)  # (task, completion_time)
     queue: List[Task] = field(default_factory=list)
@@ -60,6 +64,9 @@ class FogEnv:
         use_task_dependence: bool = False,
         max_stages_per_job: int = 3,
         handoff_latency: float = 0.2, # seconds penalty for handing off between nodes in a job
+        input_size_range: Tuple[float, float] = (0.5, 2.0), # MB
+        output_size_range: Tuple[float, float] = (0.5, 2.0), # MB
+        handoff_bandwidth_mbps: float = 10.0, # Mbps for handoff data transfer between nodes
         seed: Optional[int] = None,
     ):
         # reward weights
@@ -86,6 +93,9 @@ class FogEnv:
         self.completed_jobs: List[Dict[str, Any]] = [] # completed job stats
         self.last_node_for_job: Dict[int, int] = {} # last assigned node per job
         self.handoff_latency = handoff_latency
+        self.input_size_range = input_size_range
+        self.output_size_range = output_size_range
+        self.handoff_bandwidth_mbps = handoff_bandwidth_mbps
         self.timeline_log = []
         # RNG
         self._rng = np.random.default_rng(seed)
@@ -102,6 +112,8 @@ class FogEnv:
                     power_idle=float(cfg["power_idle"]),
                     power_max=float(cfg["power_max"]),
                     base_latency=float(cfg["base_latency"]),
+                    downlink_mbps=float(cfg.get("downlink_mbps", 100.0)),
+                    uplink_mbps=float(cfg.get("uplink_mbps", 100.0)),
                 )
             )
         self.num_nodes = len(self.nodes)
@@ -151,6 +163,8 @@ class FogEnv:
             raise RuntimeError("No current task. Did you call reset()?")
         chosen_node = self.nodes[action]
         task = self.current_task
+        is_cloud = self.nodes[action].is_cloud
+        cloud_penalty = 0.15 if is_cloud else 0.0
         # simulate assignment
         prev_node_id = self.last_node_for_job.get(task.job_id) if self.use_task_dependence else None
         E_i, L_i, U_i, deadline_miss, overload, finish_time = self._simulate_task_on_node(task, chosen_node,prev_node_id=prev_node_id)
@@ -200,6 +214,7 @@ class FogEnv:
             deadline_miss=deadline_miss,
             overload=overload,
             arrival=task.arrival_time,
+            cloud_penalty=cloud_penalty,
         )
         # accounting for episode progress
         self.steps_done += 1
@@ -213,6 +228,9 @@ class FogEnv:
                 if task.stage_idx + 1 < task.num_stages:
                     # there is a next stage in the same job
                     next_stage_idx = task.stage_idx + 1
+                    length2 = float(self._rng.uniform(*self.task_length_range))
+                    input2 = float(self._rng.uniform(*self.input_size_range))
+                    output2 = float(self._rng.uniform(*self.output_size_range))
                     # you can differentiate stage lengths if you want
                     length2 = float(self._rng.uniform(*self.task_length_range))
                     self.current_task = Task(
@@ -222,6 +240,8 @@ class FogEnv:
                         job_id=task.job_id,
                         stage_idx=next_stage_idx,
                         num_stages=task.num_stages,
+                        input_size_mb=input2,
+                        output_size_mb=output2,
                     )
                 else:
                     # last stage of this job -> start a completely new job
@@ -253,7 +273,8 @@ class FogEnv:
         """
         length = float(self._rng.uniform(*self.task_length_range))
         slack = float(self._rng.uniform(*self.deadline_slack_range))
-
+        input_size_mb = float(self._rng.uniform(*self.input_size_range))
+        output_size_mb = float(self._rng.uniform(*self.output_size_range))
         arrival = self.current_time  # one task per step at current time
         deadline = arrival + slack
 
@@ -261,6 +282,8 @@ class FogEnv:
             length_mi=length,
             deadline=deadline,
             arrival_time=arrival,
+            input_size_mb=input_size_mb,
+            output_size_mb=output_size_mb,
         )
         
     def _generate_job_first_task(self) -> Task:
@@ -275,7 +298,9 @@ class FogEnv:
         deadline = arrival + slack
         job_id = self.next_job_id
         self.next_job_id += 1
-        num_stages = self._rng.integers(2, self.max_stages_per_job + 1) # random number of stages per job, at least 2 stages
+        num_stages = self._rng.integers(1, self.max_stages_per_job + 1) # random number of stages per job, at least 1 stage
+        input_size = float(self._rng.uniform(*self.input_size_range))
+        output_size = float(self._rng.uniform(*self.output_size_range))
 
         return Task(
             length_mi=length,
@@ -284,103 +309,114 @@ class FogEnv:
             job_id=job_id,
             stage_idx=0,
             num_stages=num_stages,
+            input_size_mb=input_size,
+            output_size_mb=output_size,
         )
         
     def _simulate_task_on_node(
-        self,
-        task: Task,
-        node: Node,
-        prev_node_id: Optional[int] = None,
+    self,
+    task: Task,
+    node: Node,
+    prev_node_id: Optional[int] = None,
     ) -> Tuple[float, float, float, bool, bool, float]:
-            """
-            Compute latency, energy and utilisation impact of assigning `task` to `node`,
-            using continuous-time energy integration.
-            - We track all (start_time, end_time) intervals of tasks on this node.
-            - For energy, we integrate power over time only over intervals where THIS task
-            is active, with power determined by total concurrent tasks.
-            """
-            start_time = max(task.arrival_time, node.busy_until)
-            service_time = task.length_mi / node.mips
-            end_time = start_time + service_time
+        """
+        Compute latency, energy and utilisation impact of assigning `task` to `node`,
+        using continuous-time energy integration.
+        - We track all (start_time, end_time) intervals of tasks on this node.
+        - For energy, we integrate power over time only over intervals where THIS task
+        is active, with power determined by total concurrent tasks.
+        """
+        start_time = max(task.arrival_time, node.busy_until)
+        service_time = task.length_mi / node.mips
+        end_time = start_time + service_time
 
-            node.running_intervals.append((start_time, end_time))
-            node.busy_until = max(node.busy_until, end_time)
-            node.queue.append(task)
+        node.running_intervals.append((start_time, end_time))
+        node.busy_until = max(node.busy_until, end_time)
+        node.queue.append(task)
 
-            net_delay = node.base_latency
-            handoff = 0.0
-            if prev_node_id is not None and prev_node_id != node.node_id:
-                handoff = self.handoff_latency
-            completion_time = end_time + net_delay + handoff
-            L_i = (completion_time - task.arrival_time)
+        # Uplink + downlink latency based on data size and bandwidth
+        # S in MB, B in Mbps => time [s] ≈ (MB * 8 / Mbps)
+        uplink = node.base_latency + (task.input_size_mb * 8.0 / max(1e-6, node.uplink_mbps))
+        downlink = (task.output_size_mb * 8.0 / max(1e-6, node.downlink_mbps))
+        net_delay = uplink + downlink
 
-            boundaries = []
+        handoff = 0.0
+        if prev_node_id is not None and prev_node_id != node.node_id:
+            handoff = self.handoff_latency + (
+                task.output_size_mb * 8.0 / max(1e-6, self.handoff_bandwidth_mbps)
+            )
+
+        completion_time = end_time + net_delay + handoff
+        L_i = (completion_time - task.arrival_time)
+
+        boundaries = []
+        for s, e in node.running_intervals:
+            boundaries.append(s)
+            boundaries.append(e)
+        boundaries = sorted(set(boundaries))
+
+        E_i = 0.0
+        max_util_during_task = 0.0
+        overload = False
+
+        t_task_start = start_time
+        t_task_end = end_time
+
+        for i in range(len(boundaries) - 1):
+            t_start = boundaries[i]
+            t_end = boundaries[i + 1]
+            duration = t_end - t_start
+            if duration <= 0:
+                continue
+            if t_end <= t_task_start or t_start >= t_task_end:
+                continue
+
+            seg_start = max(t_start, t_task_start)
+            seg_end = min(t_end, t_task_end)
+            seg_duration = seg_end - seg_start
+            if seg_duration <= 0:
+                continue
+
+            active = 0
             for s, e in node.running_intervals:
-                boundaries.append(s)
-                boundaries.append(e)
-            boundaries = sorted(set(boundaries))
+                if not (e <= t_start or s >= t_end):
+                    active += 1
 
-            E_i = 0.0
-            max_util_during_task = 0.0
-            overload = False
+            U = min(1.0, active / max(1, node.cores))
+            P = node.power_idle + (node.power_max - node.power_idle) * U
+            E_i += P * seg_duration
 
-            t_task_start = start_time
-            t_task_end = end_time
+            if U > max_util_during_task:
+                max_util_during_task = U
+            if U > self.u_max:
+                overload = True
 
-            for i in range(len(boundaries) - 1):
-                t_start = boundaries[i]
-                t_end = boundaries[i + 1]
-                duration = t_end - t_start
-                if duration <= 0:
-                    continue
-                if t_end <= t_task_start or t_start >= t_task_end:
-                    continue
+        deadline_slack = task.deadline - task.arrival_time
+        deadline_miss = L_i > deadline_slack
+        U_i = max_util_during_task
 
-                seg_start = max(t_start, t_task_start)
-                seg_end = min(t_end, t_task_end)
-                seg_duration = seg_end - seg_start
-                if seg_duration <= 0:
-                    continue
+        job_id = getattr(task, "job_id", None)
+        if job_id is None:
+            job_id = getattr(task, "job_id_", None)
 
-                active = 0
-                for s, e in node.running_intervals:
-                    if not (e <= t_start or s >= t_end):
-                        active += 1
+        stage_idx = getattr(task, "stage_idx", None)
+        num_stages = getattr(task, "num_stages", None)
 
-                U = min(1.0, active / max(1, node.cores))
-                P = node.power_idle + (node.power_max - node.power_idle) * U
-                E_i += P * seg_duration
+        if hasattr(self, "timeline_log"):
+            self.timeline_log.append({
+                "job_id": job_id,
+                "stage_idx": stage_idx,
+                "num_stages": num_stages,
+                "node_id": node.node_id,
+                "node_name": getattr(node, "name", f"Node{node.node_id}"),
+                "start_time": float(start_time),
+                "finish_time": float(completion_time),
+            })
 
-                if U > max_util_during_task:
-                    max_util_during_task = U
-                if U > self.u_max:
-                    overload = True
+        if job_id is not None:
+            self.last_node_for_job[job_id] = node.node_id
 
-            deadline_slack = task.deadline - task.arrival_time
-            deadline_miss = L_i > deadline_slack
-            U_i = max_util_during_task
-
-            job_id = getattr(task, "job_id", None)
-            if job_id is None:
-                job_id = getattr(task, "job_id_", None)
-
-            stage_idx = getattr(task, "stage_idx", None)
-            num_stages = getattr(task, "num_stages", None)
-
-            if hasattr(self, "timeline_log"):
-                self.timeline_log.append({
-                    "job_id": job_id,
-                    "stage_idx": stage_idx,
-                    "num_stages": num_stages,
-                    "node_id": node.node_id,
-                    "node_name": getattr(node, "name", f"Node{node.node_id}"),
-                    "start_time": float(start_time),
-                    "finish_time": float(completion_time),
-                })
-
-            self.last_node_for_job[job_id] = node.node_id if job_id is not None else node.node_id
-
-            return E_i, L_i, U_i, deadline_miss, overload, end_time
+        return E_i, L_i, U_i, deadline_miss, overload, end_time
 
     def _compute_reward(
         self,
@@ -391,6 +427,7 @@ class FogEnv:
         deadline_miss: bool,
         overload: bool,
         arrival: float,
+        cloud_penalty: float = 0.0,
     ) -> float:
         """
         Apply the RL reward formula:
@@ -407,6 +444,7 @@ class FogEnv:
             penalty += self.lambda_deadline
         if overload:
             penalty += self.lambda_overload
+        penalty += cloud_penalty
         reward = -(cost + penalty)
         return reward
 
