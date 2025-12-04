@@ -38,6 +38,7 @@ class Node:
     # dynamic fields
     running_intervals: List[Tuple[float, float]] = field(default_factory=list)  # (task, completion_time)
     queue: List[Task] = field(default_factory=list)
+    core_busy_until = List[float] = field(default_factory=list)  # per-core
     busy_until: float = 0.0  # time when node becomes free
 class FogEnv:
     """
@@ -134,7 +135,7 @@ class FogEnv:
         for node in self.nodes:
             node.queue.clear()
             node.running_intervals.clear()
-            node.busy_until = 0.0
+            node.busy_until = [0.0] * max(1,node.cores)
 
         self.job_stats.clear()
         self.completed_jobs.clear()
@@ -326,12 +327,19 @@ class FogEnv:
         - For energy, we integrate power over time only over intervals where THIS task
         is active, with power determined by total concurrent tasks.
         """
-        start_time = max(task.arrival_time, node.busy_until)
-        service_time = task.length_mi / node.mips
+        
+        if not node.core_busy_until or len(node.core_busy_until) != max(1,node.cores):
+            node.core_busy_until = [0.0] * max(1,node.cores)
+            
+        core_idx = int(np.argmin(node.core_busy_until))
+        core_free_at = node.core_busy_until[core_idx]
+        start_time = max(task.arrival_time, core_free_at)
+        mips_per_core = node.mips / max(1, node.cores)
+        service_time = task.length_mi / mips_per_core
         end_time = start_time + service_time
-
+        node.core_busy_until[core_idx] = end_time
+        node.busy_until = min(node.core_busy_until)        
         node.running_intervals.append((start_time, end_time))
-        node.busy_until = max(node.busy_until, end_time)
         node.queue.append(task)
 
         # Uplink + downlink latency based on data size and bandwidth
@@ -376,14 +384,16 @@ class FogEnv:
             seg_duration = seg_end - seg_start
             if seg_duration <= 0:
                 continue
-
+            
+            #how many tasks are active on the node during this segment 
             active = 0
             for s, e in node.running_intervals:
                 if not (e <= t_start or s >= t_end):
                     active += 1
-
+            #utilisation based on number of active tasks vs cores
             U = min(1.0, active / max(1, node.cores))
             P = node.power_idle + (node.power_max - node.power_idle) * U
+            # energy contribution for this task in this overlapping interval
             E_i += P * seg_duration
 
             if U > max_util_during_task:
