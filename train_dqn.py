@@ -11,8 +11,8 @@ def main():
     fog_env = FogEnv(
         nodes_config=NODES_CONFIG,
         episode_length=800,
-        alpha=0.4, # weight for energy in reward
-        beta=0.6, # weight for latency in reward
+        alpha=0.6, # weight for energy in reward
+        beta=0.4, # weight for latency in reward
         lambda_deadline=4.0, # penalty for deadline miss
         lambda_overload=0.5, # penalty for overload
         u_max=0.9,

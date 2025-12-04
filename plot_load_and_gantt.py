@@ -25,20 +25,23 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 def build_fog_env() -> FogEnv:
     return FogEnv(
         nodes_config=NODES_CONFIG,
-        episode_length=500,
-        alpha=0.4,
-        beta=0.6,
-        lambda_deadline=4.0,
-        lambda_overload=0.5,
+        episode_length=800,
+        alpha=0.6, # weight for energy in reward
+        beta=0.4, # weight for latency in reward
+        lambda_deadline=4.0, # penalty for deadline miss
+        lambda_overload=0.5, # penalty for overload
         u_max=0.9,
         e_ref=20.0,
         l_ref=2.0,
-        task_length_range=(50.0, 250.0),
-        deadline_slack_range=(1.0, 3.0),
-        interarrival_range=(0.0, 0.05),
+        task_length_range=(1000.0, 10000.0),
+        deadline_slack_range=(1.0, 5.0),
+        interarrival_range=(0.05, 0.2),
         use_task_dependence=True,
-        max_stages_per_job=3,
-        handoff_latency=0.2,
+        max_stages_per_job= 3,
+        handoff_latency=0.02,
+        input_size_range=(0.1, 0.8),  # in MB
+        output_size_range=(0.02, 0.25),  # in MB
+        handoff_bandwidth_mbps= 50.0,  # between fog nodes
         seed=123,
     )
 

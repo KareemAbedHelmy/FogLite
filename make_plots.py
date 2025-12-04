@@ -7,13 +7,18 @@ plots_dir = os.path.join(BASE_DIR, "plots")
 os.makedirs(plots_dir, exist_ok=True)
 
 algos = ["Round Robin", "Least Loaded", "Random", "DQN"]
-energy_task = [29.6535, 19.2552, 29.3158, 18.3908]
-latency_task = [10.3900, 2.4376, 10.0219, 3.8739]
-miss_task = [75.30, 60.04, 74.70, 49.08]
 
-energy_job = [73.8239, 48.1835, 73.2101, 44.9371]
-latency_job = [16.4544, 2.4789, 15.5755, 4.1890]
-miss_job = [92.52, 60.43, 91.75, 53.81]
+# === FINAL RESULTS FROM eval_policies.py ===
+# Per-task metrics
+energy_task  = [18.5392, 18.7305, 18.7178, 19.9546]   # Avg energy per task (J)
+latency_task = [5.5166, 1.3520, 7.4598, 1.4769]       # Avg latency per task (s)
+miss_task    = [44.11, 11.92, 58.83, 12.71]           # Deadline miss rate per task (%)
+
+# Per-job metrics
+energy_job   = [37.0764, 37.7211, 37.2734, 40.6445]   # Avg energy per job (J)
+latency_job  = [7.4748, 1.3491, 10.7793, 1.5079]      # Avg latency per job (s)
+miss_job     = [51.30, 10.16, 72.11, 10.97]           # Job deadline miss rate (%)
+
 
 def save_bar(y, title, ylabel, filename):
     plt.figure()
@@ -26,6 +31,7 @@ def save_bar(y, title, ylabel, filename):
     plt.savefig(path)
     plt.close()
     return path
+
 
 paths = {}
 
@@ -71,6 +77,7 @@ paths['deadline_miss_job'] = save_bar(
     "deadline_miss_rate_job.png"
 )
 
+
 # Scatter plots for energy vs latency
 def save_scatter(latency, energy, title, xlab, ylab, filename):
     plt.figure()
@@ -85,6 +92,7 @@ def save_scatter(latency, energy, title, xlab, ylab, filename):
     plt.savefig(path)
     plt.close()
     return path
+
 
 paths['scatter_task'] = save_scatter(
     latency_task,
