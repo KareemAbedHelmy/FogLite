@@ -8,16 +8,16 @@ os.makedirs(plots_dir, exist_ok=True)
 
 algos = ["Round Robin", "Least Loaded", "Random", "DQN"]
 
-# === FINAL RESULTS FROM eval_policies.py ===
+# === CORRECTED RESULTS FROM eval_policies.py ===
 # Per-task metrics
-energy_task  = [18.5392, 18.7305, 18.7178, 19.9546]   # Avg energy per task (J)
-latency_task = [5.5166, 1.3520, 7.4598, 1.4769]       # Avg latency per task (s)
-miss_task    = [44.11, 11.92, 58.83, 12.71]           # Deadline miss rate per task (%)
+energy_task  = [17.5749, 13.3485, 16.2220, 11.1944]   # Avg energy per task (J)
+latency_task = [1.3245, 1.5163, 1.3297, 1.0432]       # Avg latency per task (s)
+miss_task    = [12.34, 16.58, 12.37, 4.74]            # Deadline miss rate per task (%)
 
 # Per-job metrics
-energy_job   = [37.0764, 37.7211, 37.2734, 40.6445]   # Avg energy per job (J)
-latency_job  = [7.4748, 1.3491, 10.7793, 1.5079]      # Avg latency per job (s)
-miss_job     = [51.30, 10.16, 72.11, 10.97]           # Job deadline miss rate (%)
+energy_job   = [35.1005, 26.6781, 32.4675, 22.2556]   # Avg energy per job (J)
+latency_job  = [1.3678, 1.7579, 1.3913, 1.1230]       # Avg latency per job (s)
+miss_job     = [11.94, 20.19, 12.19, 4.52]            # Job deadline miss rate (%)
 
 
 def save_bar(y, title, ylabel, filename):
