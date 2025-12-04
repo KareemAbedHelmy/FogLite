@@ -174,7 +174,7 @@ def main():
         handoff_bandwidth_mbps= 50.0,  # between fog nodes
         seed=123,
     )
-    episodes = 10
+    episodes = 100
     # Heuristic policies
     rr_stats = run_policy_env(fog_env, round_robin_policy, episodes=episodes)
     ll_stats = run_policy_env(fog_env, least_loaded_policy, episodes=episodes)
