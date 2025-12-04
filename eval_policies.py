@@ -156,8 +156,8 @@ def main():
     fog_env = FogEnv(
         nodes_config=NODES_CONFIG,
         episode_length=800,
-        alpha=0.4,
-        beta=0.6,
+        alpha=0.6,
+        beta=0.4,
         lambda_deadline=4.0,
         lambda_overload=0.5,
         u_max=0.9,
